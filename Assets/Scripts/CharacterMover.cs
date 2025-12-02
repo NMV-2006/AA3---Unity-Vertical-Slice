@@ -1,7 +1,7 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.InputSystem; // PARA Keyboard.current
+using UnityEngine.UI;   // <<< Necesario para la UI
 
 [RequireComponent(typeof(Rigidbody))]
 [RequireComponent(typeof(GroundDetector))]
@@ -26,10 +26,6 @@ public class CharacterMover : MonoBehaviour
     // Control en el aire
     public float airControl = 0.5f;
 
-    // ▼▼ NUEVO: multiplicador de caída lenta ▼▼
-    [Range(0f, 1f)]
-    public float slowFallMultiplier = 0.3f;
-
     Rigidbody rb;
     GroundDetector gd;
 
@@ -46,6 +42,20 @@ public class CharacterMover : MonoBehaviour
 
     InputSystem_Actions input;
 
+    // ================================
+    //      ENERGÍA AÉREA
+    // ================================
+    public float maxAirEnergy = 5f;     // 3 segundos máximos
+    public float airEnergy;             // energía actual
+    public float slowFallCost = 1f;     // costo por segundo de caída lenta
+    public float airJumpCost = 0.4f;      // costo de salto en el aire
+    public float airMoveCost = 0.4f;    // costo por mover en el aire
+
+    bool canUseAirAbilities => airEnergy > 0.05f;
+
+    // UI RADIAL
+    public Image airEnergyUI;   // <<< Imagen radial del HUD
+
     void Start()
     {
         rb = GetComponent<Rigidbody>();
@@ -54,17 +64,32 @@ public class CharacterMover : MonoBehaviour
 
         input = new InputSystem_Actions();
         input.Enable();
+
+        airEnergy = maxAirEnergy; // energía llena al comenzar
     }
 
     private void Update()
     {
+        UpdateUI(); // <<< actualizar UI
+
         if (input.Player.Jump.WasPressedThisFrame())
             TryJump();
     }
 
     void TryJump()
     {
-        rb.linearVelocity = transform.up * jumpForce;
+        if (gd.grounded)
+        {
+            rb.linearVelocity = transform.up * jumpForce;
+            return;
+        }
+
+        // salto EN EL AIRE
+        if (canUseAirAbilities && airEnergy >= airJumpCost)
+        {
+            rb.linearVelocity = transform.up * jumpForce;
+            airEnergy -= airJumpCost;
+        }
     }
 
     void FixedUpdate()
@@ -99,12 +124,22 @@ public class CharacterMover : MonoBehaviour
     {
         if (gd.grounded)
         {
+            RecoverEnergy(); // <<< recuperar energía
             GroundMovement();
         }
         else
         {
             AirMovement();
         }
+    }
+
+    // =====================================================
+    //              RECUPERAR ENERGÍA AL TOCAR SUELO
+    // =====================================================
+    void RecoverEnergy()
+    {
+        if (airEnergy < maxAirEnergy)
+            airEnergy = maxAirEnergy;
     }
 
     void GroundMovement()
@@ -155,55 +190,51 @@ public class CharacterMover : MonoBehaviour
         rb.Move(rb.position + currentMov * speedMovement * Time.fixedDeltaTime, rot);
     }
 
+    // =====================================================
+    //                  MOVIMIENTO EN EL AIRE
+    // =====================================================
     void AirMovement()
     {
-        // ▼▼ CAÍDA LENTA: detecta Shift directamente (nuevo Input System o Input.Legacy) ▼▼
-        if (rb.linearVelocity.y < 0 && IsHoldingSlowFall())
+        // -------------------------------------------
+        // CAÍDA LENTA si pulsa Shift y tiene energía
+        // -------------------------------------------
+        if (input.Player.Sprint.IsPressed() && canUseAirAbilities)
         {
-            rb.linearVelocity = new Vector3(
-                rb.linearVelocity.x,
-                rb.linearVelocity.y * slowFallMultiplier,
-                rb.linearVelocity.z
+            rb.linearVelocity = new Vector3(rb.linearVelocity.x, rb.linearVelocity.y * 0.3f, rb.linearVelocity.z);
+            airEnergy -= slowFallCost * Time.fixedDeltaTime;
+        }
+
+        // -------------------------------------------
+        // MOVIMIENTO AÉREO (gasta energía)
+        // -------------------------------------------
+        if (canUseAirAbilities)
+        {
+            Vector3 inputVector = new Vector3(
+                input.Player.Move.ReadValue<Vector2>().x,
+                0,
+                input.Player.Move.ReadValue<Vector2>().y
             );
+
+            float magnitude = Mathf.Clamp01(inputVector.magnitude);
+
+            if (magnitude > 0)
+            {
+                airEnergy -= airMoveCost * Time.fixedDeltaTime;
+
+                Vector3 movForward = cam.transform.forward * inputVector.z;
+                Vector3 movRight = cam.transform.right * inputVector.x;
+
+                Vector3 airMov = (movForward + movRight);
+                airMov.y = 0;
+                airMov = airMov.normalized * magnitude;
+
+                rb.linearVelocity += airMov * (speedMovement * airControl * Time.fixedDeltaTime);
+            }
         }
 
-        // --- movimiento horizontal en el aire ---
-        Vector3 inputVector = new Vector3(
-            input.Player.Move.ReadValue<Vector2>().x,
-            0,
-            input.Player.Move.ReadValue<Vector2>().y
-        );
-
-        float magnitude = Mathf.Clamp01(inputVector.magnitude);
-
-        if (magnitude > 0)
-        {
-            Vector3 movForward = cam.transform.forward * inputVector.z;
-            Vector3 movRight = cam.transform.right * inputVector.x;
-
-            Vector3 airMov = (movForward + movRight);
-            airMov.y = 0;
-            airMov = airMov.normalized * magnitude;
-
-            rb.linearVelocity += airMov * (speedMovement * airControl * Time.fixedDeltaTime);
-        }
-    }
-
-    // Comprueba si el jugador está manteniendo Shift (compatibilidad con Input System y con Input legacy)
-    bool IsHoldingSlowFall()
-    {
-        // NUEVO Input System (recomendado)
-        if (Keyboard.current != null)
-        {
-            if (Keyboard.current.leftShiftKey.isPressed || Keyboard.current.rightShiftKey.isPressed)
-                return true;
-        }
-
-        // Fallback al Input clásico
-        if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
-            return true;
-
-        return false;
+        // si la energía llega a cero → caída normal
+        if (airEnergy < 0)
+            airEnergy = 0;
     }
 
     void DroppedOff()
@@ -214,5 +245,14 @@ public class CharacterMover : MonoBehaviour
         }
 
         airSpeedFollowupCurrent = 0;
+    }
+
+    // =====================================================
+    //                  ACTUALIZACIÓN UI
+    // =====================================================
+    void UpdateUI()
+    {
+        if (airEnergyUI != null)
+            airEnergyUI.fillAmount = airEnergy / maxAirEnergy;
     }
 }
