@@ -1,4 +1,4 @@
-using UnityEngine;
+ï»¿using UnityEngine;
 
 public class PlataformaMovil : MonoBehaviour
 {
@@ -55,21 +55,21 @@ public class PlataformaMovil : MonoBehaviour
     }
 
     // ============================================================
-    // PARENTING DINÁMICO DEL JUGADOR SOBRE LA PLATAFORMA
+    // PARENTING DINAMICO DEL JUGADOR SOBRE LA PLATAFORMA
     // ============================================================
 
     private void OnCollisionEnter(Collision collision)
     {
-        // Comprobamos si pisa la parte superior
+        // Comprobamos si el objeto que colisiona es el jugador
         if (collision.collider.CompareTag(etiquetaJugador))
         {
-            // Asegurarnos de que está encima (normal del golpe apunta hacia arriba)
+            // Verificar que esta encima de la plataforma (normal del contacto apunta hacia arriba)
             foreach (ContactPoint contact in collision.contacts)
             {
                 if (Vector3.Dot(contact.normal, Vector3.up) > 0.5f)
                 {
                     jugadorActual = collision.collider.transform;
-                    jugadorActual.SetParent(transform); // Hacer hijo
+                    jugadorActual.SetParent(transform); // Hacer hijo de la plataforma
                     return;
                 }
             }
@@ -78,10 +78,28 @@ public class PlataformaMovil : MonoBehaviour
 
     private void OnCollisionExit(Collision collision)
     {
+        // Cuando el jugador sale de la plataforma, quitar el parent
         if (jugadorActual != null && collision.collider.transform == jugadorActual)
         {
             jugadorActual.SetParent(null);   // Quitar parent
             jugadorActual = null;
+        }
+    }
+
+    private void OnCollisionStay(Collision collision)
+    {
+        // Asegurarnos de que el jugador sigue siendo hijo mientras esta en contacto
+        if (collision.collider.CompareTag(etiquetaJugador) && jugadorActual == null)
+        {
+            foreach (ContactPoint contact in collision.contacts)
+            {
+                if (Vector3.Dot(contact.normal, Vector3.up) > 0.5f)
+                {
+                    jugadorActual = collision.collider.transform;
+                    jugadorActual.SetParent(transform);
+                    return;
+                }
+            }
         }
     }
 }
